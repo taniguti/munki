@@ -6,7 +6,7 @@ appleupdates.py
 Utilities for dealing with Apple Software Update.
 
 """
-# Copyright 2009-2014 Greg Neagle.
+# Copyright 2009-2015 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -117,7 +117,6 @@ LOCAL_DOWNLOAD_CATALOG_NAME = 'local_download.sucatalog'
 # This causes softwareupdate -d -a to fail cleanly if we don't
 # have the required packages already downloaded.
 LOCAL_CATALOG_NAME = 'local_install.sucatalog'
-
 
 
 class Error(Exception):
@@ -331,6 +330,8 @@ class AppleUpdates(object):
         of these files."""
         catalog = FoundationPlist.readPlist(self.filtered_catalog_path)
         if not 'Products' in catalog:
+            munkicommon.display_warning(
+                '"Products" not found in %s', self.filtered_catalog_path)
             return
 
         for product_key in catalog['Products'].keys():
@@ -574,9 +575,14 @@ class AppleUpdates(object):
 
         catalog_url = 'file://localhost' + urllib2.quote(
             self.local_download_catalog_path)
-
-        if munkicommon.getOsVersion() == '10.5':
+        os_version_tuple = munkicommon.getOsVersion(as_tuple=True)
+        if os_version_tuple == (10, 5):
             retcode = self._LeopardDownloadAvailableUpdates(catalog_url)
+        elif os_version_tuple >= (10, 11):
+            # 10.11 seems not to like file:// URLs
+            catalog_url = self._ElCapitanGetCatalogURL()
+            retcode = self._RunSoftwareUpdate(
+                ['-d', '-a'], catalog_url=catalog_url, stop_allowed=True)
         else:
             retcode = self._RunSoftwareUpdate(
                 ['-d', '-a'], catalog_url=catalog_url, stop_allowed=True)
@@ -599,13 +605,19 @@ class AppleUpdates(object):
             msg = 'Checking for available Apple Software Updates...'
             self._ResetMunkiStatusAndDisplayMessage(msg)
 
-        try:  # remove any old ApplicableUpdates.plist, but ignore errors.
+        try:
+            # remove any old ApplicableUpdates.plist, but ignore errors.
             os.unlink(self.applicable_updates_plist)
         except (OSError, IOError):
             pass
 
-        # use our locally-cached Apple catalog
-        catalog_url = 'file://localhost' + urllib2.quote(catalog_path)
+        os_version_tuple = munkicommon.getOsVersion(as_tuple=True)
+        if os_version_tuple >= (10, 11):
+            # 10.11 does not appear to like file:// URLs
+            catalog_url = self._ElCapitanGetCatalogURL()
+        else:
+            # use our locally-cached Apple catalog
+            catalog_url = 'file://localhost' + urllib2.quote(catalog_path)
         su_options = ['-l', '-f', self.applicable_updates_plist]
 
         retcode = self._RunSoftwareUpdate(
@@ -613,7 +625,7 @@ class AppleUpdates(object):
         if munkicommon.stopRequested():
             return []
         if retcode:  # there was an error
-            if munkicommon.getOsVersion() == '10.5':
+            if os_version_tuple == (10, 5):
                 pass  # Leopard softwareupdate always returns a non-zero exit.
             else:
                 munkicommon.display_error('softwareupdate error: %s' % retcode)
@@ -660,6 +672,15 @@ class AppleUpdates(object):
         f = _open(local_apple_sus_catalog, 'wb')
         f.write(contents)
         f.close()
+
+    def _ElCapitanGetCatalogURL(self):
+        """Returns SoftwareUpdateServerURL set in Munki's preferences or None.
+        Works around an issue with catalog changes causing cached downloads to
+        be deleted."""
+        munkisuscatalog = munkicommon.pref('SoftwareUpdateServerURL')
+        if munkisuscatalog:
+            return munkisuscatalog
+        return None
 
     def _GetAppleCatalogURL(self):
         """Returns the catalog URL of the Apple SU catalog for the current Mac.
@@ -994,16 +1015,28 @@ class AppleUpdates(object):
                 APPLE_SOFTWARE_UPDATE_PREFS_DOMAIN,
                 kCFPreferencesAnyUser, kCFPreferencesCurrentHost)
         # now set our custom CatalogURL
-        CFPreferencesSetValue(
-            'CatalogURL', catalog_url,
-            APPLE_SOFTWARE_UPDATE_PREFS_DOMAIN,
-            kCFPreferencesAnyUser, kCFPreferencesCurrentHost)
-        # finally, sync things up
-        if not CFPreferencesSynchronize(
+        os_version_tuple = munkicommon.getOsVersion(as_tuple=True)
+        if os_version_tuple < (10, 11):
+            CFPreferencesSetValue(
+                'CatalogURL', catalog_url,
                 APPLE_SOFTWARE_UPDATE_PREFS_DOMAIN,
-                kCFPreferencesAnyUser, kCFPreferencesCurrentHost):
-            munkicommon.display_error(
-                'Error setting com.apple.SoftwareUpdate CatalogURL.')
+                kCFPreferencesAnyUser, kCFPreferencesCurrentHost)
+            # finally, sync things up
+            if not CFPreferencesSynchronize(
+                    APPLE_SOFTWARE_UPDATE_PREFS_DOMAIN,
+                    kCFPreferencesAnyUser, kCFPreferencesCurrentHost):
+                munkicommon.display_error(
+                    'Error setting com.apple.SoftwareUpdate CatalogURL.')
+        else:
+            # use softwareupdate --set-catalog
+            proc = subprocess.Popen(
+                ['/usr/sbin/softwareupdate', '--set-catalog', catalog_url],
+                bufsize=-1, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            (output, err) = proc.communicate()
+            if output:
+                munkicommon.display_detail(output)
+            if err:
+                munkicommon.display_error(err)
 
     def _ResetOriginalCatalogURL(self):
         """Resets SoftwareUpdate's CatalogURL to the original value"""
@@ -1020,10 +1053,28 @@ class AppleUpdates(object):
         if not original_catalog_url:
             original_catalog_url = None
         # reset CatalogURL to the one we stored
-        CFPreferencesSetValue(
-            'CatalogURL', original_catalog_url,
-            APPLE_SOFTWARE_UPDATE_PREFS_DOMAIN,
-            kCFPreferencesAnyUser, kCFPreferencesCurrentHost)
+        os_version_tuple = munkicommon.getOsVersion(as_tuple=True)
+        if os_version_tuple < (10, 11):
+            CFPreferencesSetValue(
+                'CatalogURL', original_catalog_url,
+                APPLE_SOFTWARE_UPDATE_PREFS_DOMAIN,
+                kCFPreferencesAnyUser, kCFPreferencesCurrentHost)
+        else:
+            if original_catalog_url:
+                # use softwareupdate --set-catalog
+                cmd = ['/usr/sbin/softwareupdate',
+                       '--set-catalog', original_catalog_url]
+            else:
+                # use softwareupdate --clear-catalog
+                cmd = ['/usr/sbin/softwareupdate', '--clear-catalog']
+            proc = subprocess.Popen(cmd, bufsize=-1, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
+            (output, err) = proc.communicate()
+            if output:
+                munkicommon.display_detail(output)
+            if err:
+                munkicommon.display_error(err)
+
         # remove ORIGINAL_CATALOG_URL_KEY
         CFPreferencesSetValue(
             self.ORIGINAL_CATALOG_URL_KEY, None,
@@ -1040,7 +1091,7 @@ class AppleUpdates(object):
         """Returns True if Software Update's CatalogURL is managed
         via MCX or Profiles"""
         return CFPreferencesAppValueIsForced(
-            APPLE_SOFTWARE_UPDATE_PREFS_DOMAIN, 'CatalogURL')
+            'CatalogURL', APPLE_SOFTWARE_UPDATE_PREFS_DOMAIN)
 
     def _LeopardSetupSoftwareUpdateCheck(self):
         """Set defaults for root user and current host; needed for Leopard."""
@@ -1382,8 +1433,18 @@ class AppleUpdates(object):
                            if item.get('productKey') in
                            unattended_install_product_ids]
         else:
-            # We're installing all available updates
-            su_options.extend(['-a'])
+            # We're installing all available updates; add all their names
+            for item in installlist:
+                su_options.append(
+                    item['name'] + '-' + item['version_to_install'])
+
+        # new in 10.11: '--no-scan' flag to tell softwareupdate to just install
+        # and not rescan for available updates.
+        os_version_tuple = munkicommon.getOsVersion(as_tuple=True)
+        if os_version_tuple >= (10, 11):
+            su_options.append('--no-scan')
+            # 10.11 seems not to like file:// URLs
+            catalog_url = self._ElCapitanGetCatalogURL()
 
         retcode = self._RunSoftwareUpdate(
             su_options, mode='install', catalog_url=catalog_url,
@@ -1641,12 +1702,29 @@ def installAppleUpdates(only_unattended=False):
 def appleSoftwareUpdatesAvailable(forcecheck=False, suppresscheck=False,
                                   client_id='', forcecatalogrefresh=False):
     """Method for drop-in appleupdates replacement; see primary method docs."""
+    os_version_tuple = munkicommon.getOsVersion(as_tuple=True)
+    munkisuscatalog = munkicommon.pref('SoftwareUpdateServerURL')
     appleUpdatesObject = getAppleUpdatesInstance()
     if appleUpdatesObject.CatalogURLisManaged():
-        munkicommon.display_warning(
-            "Cannot manage Apple Software updates because CatalogURL "
-            "is managed via MCX or profiles.")
-        return False
+        if os_version_tuple >= (10, 11):
+            if munkisuscatalog:
+                munkicommon.display_warning(
+                    "softwareupdate's CatalogURL is managed via MCX or "
+                    "profiles. Custom softwareupate catalog %s will be "
+                    "ignored." % munkisuscatalog)
+        else:
+            munkicommon.display_warning(
+                "Cannot efficiently manage Apple Software updates because "
+                "softwareupdate's CatalogURL is managed via MCX or profiles. "
+                "You may see unexpected or undesirable results.")
+    else:
+        if os_version_tuple >= (10, 11) and munkisuscatalog:
+            munkicommon.display_warning(
+                "Setting SoftwareUpdateServerURL in Munki's preferences under "
+                "OS X 10.11 and later may result in poor performance of "
+                "Apple Software Updates via Munki. It is recommended to "
+                "remove this setting and use com.apple.SoftwareUpdate's "
+                'settings for CatalogURL.')
     appleUpdatesObject.client_id = client_id
     appleUpdatesObject.force_catalog_refresh = forcecatalogrefresh
 
