@@ -1,13 +1,13 @@
 #!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2009-2014 Greg Neagle.
+# Copyright 2009-2016 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#      https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an 'AS IS' BASIS,
@@ -202,7 +202,7 @@ def runScript(script, display_name, runtype):
     except utils.ScriptNotFoundError:
         pass  # script is not required, so pass
     except utils.RunExternalScriptError, err:
-        munkicommon.display_warning(str(err))
+        munkicommon.display_warning(unicode(err))
     return result
 
 
@@ -435,7 +435,7 @@ def notifyUserOfUpdates(force=False):
         launchfile = '/var/run/com.googlecode.munki.ManagedSoftwareUpdate'
         f = open(launchfile, 'w')
         f.close()
-        time.sleep(0.5)
+        time.sleep(5)
         if os.path.exists(launchfile):
             os.unlink(launchfile)
         user_was_notified = True
@@ -634,7 +634,7 @@ def main():
     munkicommon.log("### Starting managedsoftwareupdate run: %s ###" % runtype)
     if options.verbose:
         print 'Managed Software Update Tool'
-        print 'Copyright 2010-2014 The Munki Project'
+        print 'Copyright 2010-2016 The Munki Project'
         print 'https://github.com/munki/munki\n'
 
     munkicommon.display_status_major('Starting...')
@@ -710,6 +710,7 @@ def main():
             if options.manualcheck:
                 # record our result
                 recordUpdateCheckResult(-1)
+            if options.munkistatusoutput:
                 # connect to socket and quit
                 munkistatus.activate()
                 munkistatus.quit()

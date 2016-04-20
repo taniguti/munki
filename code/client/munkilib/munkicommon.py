@@ -1,13 +1,13 @@
 #!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2009-2014 Greg Neagle.
+# Copyright 2009-2016 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#      https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an 'AS IS' BASIS,
@@ -519,7 +519,15 @@ def validateDateFormat(datetime_string):
 
 def log(msg, logname=''):
     """Generic logging function."""
-    logging.info(msg)  # noop unless configure_syslog() is called first.
+    if len(msg) > 1000:
+        # See http://bugs.python.org/issue11907 and RFC-3164
+        # break up huge msg into chunks and send 1000 characters at a time
+        msg_buffer = msg
+        while msg_buffer:
+            logging.info(msg_buffer[:1000])
+            msg_buffer = msg_buffer[1000:]
+    else:
+        logging.info(msg)  # noop unless configure_syslog() is called first.
 
     # date/time format string
     formatstr = '%b %d %Y %H:%M:%S %z'
@@ -1214,6 +1222,7 @@ def pref(pref_name):
         'SuppressStopButtonOnInstall': False,
         'PackageVerificationMode': 'hash',
         'FollowHTTPRedirects': 'none',
+        'UnattendedAppleUpdates': False,
     }
     pref_value = CFPreferencesCopyAppValue(pref_name, BUNDLE_ID)
     if pref_value == None:
@@ -2536,7 +2545,7 @@ def cleanUpTmpDir():
 
 
 def listdir(path):
-    """OSX HFS+ string encoding safe listdir().
+    """OS X HFS+ string encoding safe listdir().
 
     Args:
         path: path to list contents of
@@ -2545,14 +2554,14 @@ def listdir(path):
     """
     # if os.listdir() is supplied a unicode object for the path,
     # it will return unicode filenames instead of their raw fs-dependent
-    # version, which is decomposed utf-8 on OSX.
+    # version, which is decomposed utf-8 on OS X.
     #
     # we use this to our advantage here and have Python do the decoding
     # work for us, instead of decoding each item in the output list.
     #
     # references:
-    # http://docs.python.org/howto/unicode.html#unicode-filenames
-    # http://developer.apple.com/library/mac/#qa/qa2001/qa1235.html
+    # https://docs.python.org/howto/unicode.html#unicode-filenames
+    # https://developer.apple.com/library/mac/#qa/qa2001/qa1235.html
     # http://lists.zerezo.com/git/msg643117.html
     # http://unicode.org/reports/tr15/    section 1.2
     if type(path) is str:
@@ -2617,7 +2626,9 @@ def writefile(stringdata, path):
     Returns the path on success, empty string on failure.'''
     try:
         fileobject = open(path, mode='w', buffering=1)
-        print >> fileobject, stringdata.encode('UTF-8')
+        # write line-by-line to ensure proper UNIX line-endings
+        for line in stringdata.splitlines():
+            print >> fileobject, line.encode('UTF-8')
         fileobject.close()
         return path
     except (OSError, IOError):
