@@ -23,6 +23,8 @@ Created by Greg Neagle on 2010-09-29.
 Assists with importing installer items into the munki repo
 """
 import ctypes
+import errno
+import getpass
 import os
 import readline
 import subprocess
@@ -30,12 +32,109 @@ import sys
 import time
 import thread
 
+import objc
+
 from ctypes.util import find_library
 from optparse import OptionParser, BadOptionError, AmbiguousOptionError
 
 from munkilib import iconutils
 from munkilib import munkicommon
 from munkilib import FoundationPlist
+
+# PyLint cannot properly find names inside Cocoa libraries, so issues bogus
+# No name 'Foo' in module 'Bar' warnings. Disable them.
+# pylint: disable=E0611
+from CoreFoundation import CFURLCreateWithString
+from Foundation import CFPreferencesAppSynchronize
+from Foundation import CFPreferencesCopyAppValue
+from Foundation import CFPreferencesSetAppValue
+# pylint: enable=E0611
+
+# NetFS share mounting code borrowed and liberally adapted from Michael Lynn's
+# work here: https://gist.github.com/pudquick/1362a8908be01e23041d
+
+class attrdict(dict): 
+    __getattr__ = dict.__getitem__
+    __setattr__ = dict.__setitem__
+
+NetFS = attrdict()
+# Can cheat and provide 'None' for the identifier, it'll just use frameworkPath
+# instead
+# scan_classes=False means only add the contents of this Framework
+NetFS_bundle = objc.initFrameworkWrapper(
+    'NetFS', frameworkIdentifier=None,
+    frameworkPath=objc.pathForFramework('NetFS.framework'),
+    globals=NetFS, scan_classes=False)
+
+# https://developer.apple.com/library/mac/documentation/Cocoa/Conceptual/
+# ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
+# Fix NetFSMountURLSync signature
+del NetFS['NetFSMountURLSync']
+objc.loadBundleFunctions(
+    NetFS_bundle, NetFS, [('NetFSMountURLSync', 'i@@@@@@o^@')])
+
+
+class ShareMountException(Exception):
+    '''An exception raised if share mounting failed'''
+    pass
+
+
+class ShareAuthenticationNeededException(ShareMountException):
+    '''An exception raised if authentication is needed'''
+    pass
+
+
+def mount_share(share_url):
+    '''Mounts a share at /Volumes, returns the mount point or raises an error'''
+    sh_url = CFURLCreateWithString(None, share_url, None)
+    # Set UI to reduced interaction
+    open_options  = {NetFS.kNAUIOptionKey: NetFS.kNAUIOptionNoUI}
+    # Allow mounting sub-directories of root shares
+    mount_options = {NetFS.kNetFSAllowSubMountsKey: True}
+    # Mount!
+    result, output = NetFS.NetFSMountURLSync(
+        sh_url, None, None, None, open_options, mount_options, None)
+    # Check if it worked
+    if result != 0:
+        if result in (errno.ENOTSUP, errno.EAUTH):
+            # errno.ENOTSUP is returned if an afp share needs a login
+            # errno.EAUTH is returned if authentication fails (SMB for sure)
+            raise ShareAuthenticationNeededException()
+        raise ShareMountException('Error mounting url "%s": %s, error %s'
+                                  % (share_url, os.strerror(result), result))
+    # Return the mountpath
+    return str(output[0])
+
+
+def mount_share_with_credentials(share_url, username, password):
+    '''Mounts a share at /Volumes, returns the mount point or raises an error
+    Include username and password as parameters, not in the share_path URL'''
+    sh_url = CFURLCreateWithString(None, share_url, None)
+    # Set UI to reduced interaction
+    open_options  = {NetFS.kNAUIOptionKey: NetFS.kNAUIOptionNoUI}
+    # Allow mounting sub-directories of root shares
+    mount_options = {NetFS.kNetFSAllowSubMountsKey: True}
+    # Mount!
+    result, output = NetFS.NetFSMountURLSync(
+        sh_url, None, username, password, open_options, mount_options, None)
+    # Check if it worked
+    if result != 0:
+        raise ShareMountException('Error mounting url "%s": %s, error %s'
+                                  % (share_url, os.strerror(result), result))
+    # Return the mountpath
+    return str(output[0])
+
+
+def mount_share_url(share_url):
+    '''Mount a share url under /Volumes, prompting for password if needed
+    Raises ShareMountException if there's an error'''
+    try:
+        mount_share(share_url)
+    except ShareAuthenticationNeededException:
+        username = raw_input('Username: ')
+        password = getpass.getpass()
+        mount_share_with_credentials(share_url, username, password)
+
 
 if 'libedit' in readline.__doc__:
     # readline module was compiled against libedit
@@ -47,7 +146,7 @@ else:
 def raw_input_with_default(prompt, default_text):
     '''A nasty, nasty hack to get around Python readline limitations under
     OS X. Gives us editable default text for munkiimport choices'''
-    
+
     def insert_default_text(prompt, text):
         '''Helper function'''
         time.sleep(0.01)
@@ -108,7 +207,7 @@ def make_dmg(pkgpath):
         output = proc.stdout.readline()
         if not output and (proc.poll() != None):
             break
-        print output.rstrip('\n').encode(sys.stdout.encoding)
+        print output.rstrip('\n').encode('UTF-8')
         sys.stdout.flush()
     retcode = proc.poll()
     if retcode:
@@ -143,22 +242,13 @@ def mount_repo_cli():
     global WE_MOUNTED_THE_REPO
     if os.path.exists(REPO_PATH):
         return
-    os.mkdir(REPO_PATH)
     print 'Attempting to mount fileshare %s:' % REPO_URL
-    if REPO_URL.startswith('afp:'):
-        cmd = ['/sbin/mount_afp', '-i', REPO_URL, REPO_PATH]
-    elif REPO_URL.startswith('smb:'):
-        cmd = ['/sbin/mount_smbfs', REPO_URL[4:], REPO_PATH]
-    elif REPO_URL.startswith('nfs://'):
-        cmd = ['/sbin/mount_nfs', REPO_URL[6:], REPO_PATH]
+    try:
+        mount_share_url(REPO_URL)
+    except ShareMountException, err:
+        print >> sys.stderr, err
     else:
-        print >> sys.stderr, 'Unsupported filesystem URL!'
-        return
-    retcode = subprocess.call(cmd)
-    if retcode:
-        os.rmdir(REPO_PATH)
-    else:
-        WE_MOUNTED_THE_REPO = True
+         WE_MOUNTED_THE_REPO = True
 
 
 def unmount_repo_cli():
@@ -676,7 +766,7 @@ def make_catalogs():
         if not output and (proc.poll() != None):
             break
         if VERBOSE:
-            print output.rstrip('\n').encode(sys.stdout.encoding)
+            print output.rstrip('\n').encode('UTF-8')
 
     errors = proc.stderr.read()
     if errors:
@@ -700,16 +790,16 @@ def cleanup_and_exit(exitcode):
     exit(exitcode or result)
 
 
+BUNDLE_ID = 'com.googlecode.munki.munkiimport'
 def pref(prefname):
-    """Returns a preference for prefname"""
-    try:
-        _prefs = FoundationPlist.readPlist(PREFSPATH)
-    except FoundationPlist.NSPropertyListSerializationException:
-        return None
-    if prefname in _prefs:
-        return _prefs[prefname]
-    else:
-        return None
+    """Return a preference. Since this uses CFPreferencesCopyAppValue,
+    Preferences can be defined several places. Precedence is:
+        - MCX/Configuration Profile
+        - ~/Library/Preferences/ByHost/com.googlecode.munki.munkiimport.XX.plist
+        - ~/Library/Preferences/com.googlecode.munki.munkiimport.plist
+        - /Library/Preferences/com.googlecode.munki.munkiimport.plist
+    """
+    return CFPreferencesCopyAppValue(prefname, BUNDLE_ID)
 
 
 def configure():
@@ -727,10 +817,13 @@ def configure():
 
         _prefs[key] = raw_input_with_default('%15s: ' % prompt, pref(key))
 
-    try:
-        FoundationPlist.writePlist(_prefs, PREFSPATH)
-    except FoundationPlist.NSPropertyListWriteException:
-        print >> sys.stderr, 'Could not save configuration to %s' % PREFSPATH
+    for key, value in _prefs.items():
+        try:
+            CFPreferencesSetAppValue(key, value, BUNDLE_ID)
+        except BaseException:
+            print >> sys.stderr, 'Could not save configuration!'
+        finally:
+            CFPreferencesAppSynchronize(BUNDLE_ID)
 
 
 PREFSNAME = 'com.googlecode.munki.munkiimport.plist'
@@ -957,7 +1050,7 @@ def main():
             for (name, key) in fields:
                 print '%21s: %s' % (
                     name, matchingpkginfo.get(key, '').encode(
-                        sys.stdout.encoding))
+                        'UTF-8'))
             print
             if exactmatch:
                 answer = raw_input('Import this item anyway? [y/n] ')
@@ -967,9 +1060,10 @@ def main():
             answer = raw_input('Use existing item as a template? [y/n] ')
             if answer.lower().startswith('y'):
                 pkginfo['name'] = matchingpkginfo['name']
-                pkginfo['display_name'] = pkginfo.get('display_name') or \
-                    matchingpkginfo.get('display_name',
-                                        matchingpkginfo['name'])
+                pkginfo['display_name'] = (
+                    matchingpkginfo.get('display_name') or
+                    pkginfo.get('display_name') or
+                    matchingpkginfo['name'])
                 pkginfo['description'] = pkginfo.get('description') or \
                     matchingpkginfo.get('description', '')
                 if (options.subdirectory == '' and
@@ -1005,7 +1099,7 @@ def main():
             if kind == 'bool':
                 default = str(pkginfo.get(key, False))
             else:
-                default = pkginfo.get(key, '').encode(sys.stdout.encoding)
+                default = pkginfo.get(key, '').encode('UTF-8')
             pkginfo[key] = raw_input_with_default(prompt, default)
             if kind == 'bool':
                 value = pkginfo[key].lower().strip()
