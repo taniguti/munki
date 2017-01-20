@@ -1,7 +1,6 @@
-#!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2011-2016 Greg Neagle.
+# Copyright 2011-2017 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,8 +27,8 @@ import subprocess
 import time
 import uuid
 
-import munkicommon
-import FoundationPlist
+from . import osutils
+from . import FoundationPlist
 
 
 class LaunchdJobException(Exception):
@@ -42,7 +41,7 @@ class Job(object):
     '''launchd job object'''
 
     def __init__(self, cmd, environment_vars=None):
-        tmpdir = munkicommon.tmpdir()
+        tmpdir = osutils.tmpdir()
         labelprefix = 'com.googlecode.munki.'
         # create a unique id for this job
         jobid = str(uuid.uuid1())
@@ -174,11 +173,5 @@ class Job(object):
             return None
 
 
-def main():
-    '''placeholder'''
-    pass
-
-
 if __name__ == '__main__':
-    main()
-
+    print 'This is a library of support tools for the Munki Suite.'

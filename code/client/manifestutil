@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2011-2016 Greg Neagle.
+# Copyright 2011-2017 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -42,6 +42,109 @@ except ImportError:
     def get_version():
         '''Placeholder if munkilib is not available'''
         return 'UNKNOWN'
+
+# NetFS share mounting code borrowed and liberally adapted from Michael Lynn's
+# work here: https://gist.github.com/pudquick/1362a8908be01e23041d
+try:
+    import errno
+    import getpass
+    import objc
+    from CoreFoundation import CFURLCreateWithString
+
+    class Attrdict(dict):
+        '''Custom dict class'''
+        __getattr__ = dict.__getitem__
+        __setattr__ = dict.__setitem__
+
+    NetFS = Attrdict()
+    # Can cheat and provide 'None' for the identifier, it'll just use
+    # frameworkPath instead
+    # scan_classes=False means only add the contents of this Framework
+    NetFS_bundle = objc.initFrameworkWrapper(
+        'NetFS', frameworkIdentifier=None,
+        frameworkPath=objc.pathForFramework('NetFS.framework'),
+        globals=NetFS, scan_classes=False)
+
+    # https://developer.apple.com/library/mac/documentation/Cocoa/Conceptual/
+    # ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
+    # Fix NetFSMountURLSync signature
+    del NetFS['NetFSMountURLSync']
+    objc.loadBundleFunctions(
+        NetFS_bundle, NetFS, [('NetFSMountURLSync', 'i@@@@@@o^@')])
+    NETFSMOUNTURLSYNC_AVAILABLE = True
+except (ImportError, KeyError):
+    NETFSMOUNTURLSYNC_AVAILABLE = False
+
+if NETFSMOUNTURLSYNC_AVAILABLE:
+    class ShareMountException(Exception):
+        '''An exception raised if share mounting failed'''
+        pass
+
+
+    class ShareAuthenticationNeededException(ShareMountException):
+        '''An exception raised if authentication is needed'''
+        pass
+
+
+    def mount_share(share_url):
+        '''Mounts a share at /Volumes, returns the mount point or raises an
+        error'''
+        sh_url = CFURLCreateWithString(None, share_url, None)
+        # Set UI to reduced interaction
+        open_options = {NetFS.kNAUIOptionKey: NetFS.kNAUIOptionNoUI}
+        # Allow mounting sub-directories of root shares
+        mount_options = {NetFS.kNetFSAllowSubMountsKey: True}
+        # Mount!
+        result, output = NetFS.NetFSMountURLSync(
+            sh_url, None, None, None, open_options, mount_options, None)
+        # Check if it worked
+        if result != 0:
+            if result in (-6600, errno.EINVAL, errno.ENOTSUP, errno.EAUTH):
+                # -6600 is kNetAuthErrorInternal in NetFS.h 10.9+
+                # errno.EINVAL is returned if an afp share needs a login in
+                #              some versions of OS X
+                # errno.ENOTSUP is returned if an afp share needs a login in
+                #               some versions of OS X
+                # errno.EAUTH is returned if authentication fails (SMB for sure)
+                raise ShareAuthenticationNeededException()
+            raise ShareMountException(
+                'Error mounting url "%s": %s, error %s'
+                % (share_url, os.strerror(result), result))
+        # Return the mountpath
+        return str(output[0])
+
+
+    def mount_share_with_credentials(share_url, username, password):
+        '''Mounts a share at /Volumes, returns the mount point or raises an
+        error. Include username and password as parameters, not in the
+        share_path URL'''
+        sh_url = CFURLCreateWithString(None, share_url, None)
+        # Set UI to reduced interaction
+        open_options = {NetFS.kNAUIOptionKey: NetFS.kNAUIOptionNoUI}
+        # Allow mounting sub-directories of root shares
+        mount_options = {NetFS.kNetFSAllowSubMountsKey: True}
+        # Mount!
+        result, output = NetFS.NetFSMountURLSync(
+            sh_url, None, username, password, open_options, mount_options, None)
+        # Check if it worked
+        if result != 0:
+            raise ShareMountException(
+                'Error mounting url "%s": %s, error %s'
+                % (share_url, os.strerror(result), result))
+        # Return the mountpath
+        return str(output[0])
+
+
+    def mount_share_url(share_url):
+        '''Mount a share url under /Volumes, prompting for password if needed
+        Raises ShareMountException if there's an error'''
+        try:
+            mount_share(share_url)
+        except ShareAuthenticationNeededException:
+            username = raw_input('Username: ')
+            password = getpass.getpass()
+            mount_share_with_credentials(share_url, username, password)
+
 
 try:
     # PyLint cannot properly find names inside Cocoa libraries, so issues bogus
@@ -235,17 +338,19 @@ def get_manifest_pkg_sections():
 def printplistitem(label, value, indent=0):
     """Prints a plist item in an 'attractive' way"""
     indentspace = '    '
-    if type(value) == type(None):
+    if value is None:
         print indentspace*indent, '%s: !NONE!' % label
-    elif type(value) == list or type(value).__name__ == 'NSCFArray':
+    elif isinstance(value, list) or type(value).__name__ == 'NSCFArray':
         if label:
             print indentspace*indent, '%s:' % label
         for item in value:
             printplistitem('', item, indent+1)
-    elif type(value) == dict or type(value).__name__ == 'NSCFDictionary':
+    elif isinstance(value, dict) or type(value).__name__ == 'NSCFDictionary':
         if label:
             print indentspace*indent, '%s:' % label
-        for subkey in value.keys():
+        keys = list(value.keys())
+        keys.sort()
+        for subkey in keys:
             printplistitem(subkey, value[subkey], indent+1)
     else:
         if label:
@@ -293,7 +398,8 @@ def save_manifest(manifest_dict, manifest_name, overwrite_existing=False):
         print >> sys.stderr, 'Saving %s failed: %s' % (manifest_name, err)
         return False
 
-def manifest_rename(source_manifest_name, dest_manifest_name, overwrite_existing=False):
+def manifest_rename(source_manifest_name, dest_manifest_name,
+                    overwrite_existing=False):
     '''Renames an existing manifest'''
     source_manifest_path = os.path.join(
         pref('repo_path'), 'manifests', source_manifest_name)
@@ -307,7 +413,8 @@ def manifest_rename(source_manifest_name, dest_manifest_name, overwrite_existing
         os.rename(source_manifest_path, dest_manifest_path)
         return True
     except (IOError, OSError, ExpatError), err:
-        print >> sys.stderr, 'Renaming %s to %s failed: %s' % (source_manifest_name, dest_manifest_name, err)
+        print >> sys.stderr, 'Renaming %s to %s failed: %s' % (
+            source_manifest_name, dest_manifest_name, err)
         return False
 
 def repo_available():
@@ -318,7 +425,7 @@ def repo_available():
     if not repo_path:
         print >> sys.stderr, 'No repo path specified.'
         return False
-    if not os.path.exists(repo_path):
+    if not os.path.exists(repo_path) and pref('repo_url'):
         mount_repo_cli()
     if not os.path.exists(repo_path):
         return False
@@ -337,22 +444,32 @@ def mount_repo_cli():
     repo_url = pref('repo_url')
     if os.path.exists(repo_path):
         return
-    os.mkdir(repo_path)
-    print 'Attempting to mount fileshare %s:' % repo_url
-    if repo_url.startswith('afp:'):
-        cmd = ['/sbin/mount_afp', '-i', repo_url, repo_path]
-    elif repo_url.startswith('smb:'):
-        cmd = ['/sbin/mount_smbfs', repo_url[4:], repo_path]
-    elif repo_url.startswith('nfs://'):
-        cmd = ['/sbin/mount_nfs', repo_url[6:], repo_path]
+    print 'Attempting to mount fileshare %s:' % repo_path
+    if NETFSMOUNTURLSYNC_AVAILABLE:
+        # mount the share using the NetFS API
+        try:
+            mount_share_url(repo_url)
+        except ShareMountException, err:
+            print >> sys.stderr, err
+        else:
+            WE_MOUNTED_THE_REPO = True
     else:
-        print >> sys.stderr, 'Unsupported filesystem URL!'
-        return
-    retcode = subprocess.call(cmd)
-    if retcode:
-        os.rmdir(repo_path)
-    else:
-        WE_MOUNTED_THE_REPO = True
+        # do it the old way
+        os.mkdir(repo_path)
+        if repo_url.startswith('afp:'):
+            cmd = ['/sbin/mount_afp', '-i', repo_url, repo_path]
+        elif repo_url.startswith('smb:'):
+            cmd = ['/sbin/mount_smbfs', repo_url[4:], repo_path]
+        elif repo_url.startswith('nfs://'):
+            cmd = ['/sbin/mount_nfs', repo_url[6:], repo_path]
+        else:
+            print >> sys.stderr, 'Unsupported filesystem URL!'
+            return
+        retcode = subprocess.call(cmd)
+        if retcode:
+            os.rmdir(repo_path)
+        else:
+            WE_MOUNTED_THE_REPO = True
 
 
 def unmount_repo_cli():
@@ -574,6 +691,41 @@ def display_manifest(args):
         return 0
     else:
         return 2 # No such file or directory
+
+
+def expand_included_manifests(args):
+    '''Prints a manifest, expanding any included manifests.'''
+    parser = MyOptionParser()
+    parser.set_usage('''expand-included-manifest MANIFESTNAME
+        Prints included manifests in the specified manifest''')
+    try:
+        _, arguments = parser.parse_args(args)
+    except MyOptParseError, errmsg:
+        print >> sys.stderr, str(errmsg)
+        return 22 # Invalid argument
+    if len(arguments) != 1:
+        parser.print_usage(sys.stderr)
+        return 7 # Argument list too long
+    manifestname = arguments[0]
+    manifest = get_manifest(manifestname)
+    if manifest:
+        printplist(manifest_recurser(manifest))
+    else:
+        return 2 # No such file or directory
+
+
+def manifest_recurser(manifest):
+    '''Recursive expansion of included manifests'''
+    # No infinite loop checking! Be wary!
+    if 'included_manifests' in manifest:
+        for (index, item) in enumerate(manifest['included_manifests']):
+            included_manifest = get_manifest(item)
+            if included_manifest:
+                included_manifest = manifest_recurser(included_manifest)
+            manifest['included_manifests'][index] = {
+                item: included_manifest
+            }
+    return manifest
 
 
 def new_manifest(args):
@@ -960,6 +1112,26 @@ def remove_included_manifest(args):
             return 1 # Operation not permitted
 
 
+def refresh_cache(args):
+    '''Refreshes the repo data if changes were made while manifestutil was
+    running. Updates manifests, catalogs, and packages.'''
+    parser = MyOptionParser()
+    parser.set_usage('''refresh-cache
+        Refreshes the repo data''')
+    try:
+        _, arguments = parser.parse_args(args)
+    except MyOptParseError, errmsg:
+        print >> sys.stderr, str(errmsg)
+        return 22 # Invalid argument
+
+    if len(arguments) != 0:
+        parser.print_usage(sys.stderr)
+        return 22 # Invalid argument
+    CMD_ARG_DICT['manifests'] = get_manifest_names()
+    CMD_ARG_DICT['catalogs'] = get_catalogs()
+    CMD_ARG_DICT['pkgs'] = get_installer_item_names(get_catalogs())
+
+
 def show_help():
     '''Prints available subcommands'''
     print "Available sub-commands:"
@@ -1038,13 +1210,14 @@ def handle_subcommand(args):
         # find function to call by looking in the global name table
         # for a function with a name matching the subcommand
         subcommand_function = globals()[subcommand]
-        return subcommand_function(args[1:])
     except MyOptParseExit:
         return 0
     except (TypeError, KeyError):
-        print >> sys.stderr, 'Unknown subcommand: %s' % subcommand
+        print >> sys.stderr, 'Unknown subcommand: %s' % args[0]
         show_help()
         return 2
+    else:
+        return subcommand_function(args[1:])
 
 
 WE_MOUNTED_THE_REPO = False
@@ -1055,24 +1228,26 @@ def main():
     '''Our main routine'''
     global INTERACTIVE_MODE
 
-    cmds = {'add-pkg':                  'pkgs',
-            'add-catalog':              'catalogs',
-            'add-included-manifest':    'manifests',
-            'remove-pkg':               'pkgs',
-            'remove-catalog':           'catalogs',
-            'remove-included-manifest': 'manifests',
-            'list-manifests':           'manifests',
-            'list-catalogs':            'default',
-            'list-catalog-items':       'catalogs',
-            'display-manifest':         'manifests',
-            'find':                     'default',
-            'new-manifest':             'default',
-            'copy-manifest':            'manifests',
-            'rename-manifest':          'manifests',
-            'exit':                     'default',
-            'help':                     'default',
-            'configure':                'default',
-            'version':                  'default'
+    cmds = {'add-pkg':                   'pkgs',
+            'add-catalog':               'catalogs',
+            'add-included-manifest':     'manifests',
+            'remove-pkg':                'pkgs',
+            'remove-catalog':            'catalogs',
+            'remove-included-manifest':  'manifests',
+            'list-manifests':            'manifests',
+            'list-catalogs':             'default',
+            'list-catalog-items':        'catalogs',
+            'display-manifest':          'manifests',
+            'expand-included-manifests': 'manifests',
+            'find':                      'default',
+            'new-manifest':              'default',
+            'copy-manifest':             'manifests',
+            'rename-manifest':           'manifests',
+            'refresh-cache':            'default',
+            'exit':                      'default',
+            'help':                      'default',
+            'configure':                 'default',
+            'version':                   'default'
            }
     CMD_ARG_DICT['cmds'] = cmds
 
@@ -1112,4 +1287,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

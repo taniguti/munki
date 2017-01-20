@@ -1,7 +1,6 @@
-#!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2010-2016 Google Inc. All Rights Reserved.
+# Copyright 2010-2017 Google Inc. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
@@ -29,6 +28,20 @@ import grp
 import os
 import subprocess
 import stat
+
+
+class Memoize(dict):
+    '''Class to cache the return values of an expensive function.
+    This version supports only functions with non-keyword arguments'''
+    def __init__(self, func):
+        self.func = func
+
+    def __call__(self, *args):
+        return self[args]
+
+    def __missing__(self, key):
+        result = self[key] = self.func(*key)
+        return result
 
 
 class Error(Exception):
@@ -166,3 +179,29 @@ def getPIDforProcessName(processname):
                     return str(pid)
 
     return 0
+
+
+def getFirstPlist(textString):
+    """Gets the next plist from a text string that may contain one or
+    more text-style plists.
+    Returns a tuple - the first plist (if any) and the remaining
+    string after the plist"""
+    plist_header = '<?xml version'
+    plist_footer = '</plist>'
+    plist_start_index = textString.find(plist_header)
+    if plist_start_index == -1:
+        # not found
+        return ("", textString)
+    plist_end_index = textString.find(
+        plist_footer, plist_start_index + len(plist_header))
+    if plist_end_index == -1:
+        # not found
+        return ("", textString)
+    # adjust end value
+    plist_end_index = plist_end_index + len(plist_footer)
+    return (textString[plist_start_index:plist_end_index],
+            textString[plist_end_index:])
+
+
+if __name__ == '__main__':
+    print 'This is a library of support tools for the Munki Suite.'

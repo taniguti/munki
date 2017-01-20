@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2011-2016 Greg Neagle.
+# Copyright 2011-2017 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ import os
 import time
 from munkilib import munkicommon
 from munkilib import FoundationPlist
-from munkilib import updatecheck
 from Foundation import NSDate
 from Foundation import NSDictionary
 from Foundation import NSDistributedNotificationCenter
@@ -75,7 +74,7 @@ def earliestForceInstallDate():
             force_install_date = install.get('force_install_after_date')
 
             if force_install_date:
-                force_install_date = updatecheck.subtractTimeZoneOffsetFromDate(
+                force_install_date = munkicommon.subtract_tzoffset_from_date(
                     force_install_date)
                 if not earliest_date or force_install_date < earliest_date:
                     earliest_date = force_install_date
@@ -91,7 +90,7 @@ def alertUserOfForcedLogout(info=None):
       info: dict of data to send with the notification.
     '''
     consoleuser = munkicommon.getconsoleuser()
-    if not munkicommon.findProcesses(
+    if not munkicommon.find_processes(
         exe="/Applications/Managed Software Center.app",
         user=consoleuser):
         # Managed Software Center.app isn't running.
@@ -196,7 +195,7 @@ def main():
 
     if munkicommon.currentGUIusers() and earliestForceInstallDate():
         log('Beginning forced logout')
-        munkicommon.forceLogoutNow()
+        munkicommon.force_logout_now()
     log('exited')
     exit(0)
 

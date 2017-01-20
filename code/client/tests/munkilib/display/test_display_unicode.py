@@ -1,12 +1,12 @@
 #!/usr/bin/python
 # encoding: utf-8
 """
-munkicommon_display_unicode_test.py
+test_display_unicode.py
 
-Unit tests for munkicommon's display_* functions.
+Unit tests for display.display_* functions.
 
 """
-# Copyright 2014-2016 Greg Neagle.
+# Copyright 2014-2017 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@ Unit tests for munkicommon's display_* functions.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-import code.client.munkilib.munkicommon as munkicommon
 import unittest
+
+from munkilib import display
 
 
 MSG_UNI = u'Günther\'s favorite thing is %s'
@@ -33,79 +33,79 @@ ARG_STR = 'Günther'
 
 
 def log(msg, logname=''):
-    """Redefine munkicommon's logging function so our tests don't write
+    """Redefine the logging function so our tests don't write
     a bunch of garbage to Munki's logs"""
     pass
-munkicommon.log = log
+display.munkilog.log = log
 
 
 class TestDisplayInfoUnicodeOutput(unittest.TestCase):
-    """Test munkicommon display_info with text that may or may not be proper
+    """Test display_info with text that may or may not be proper
     Unicode."""
 
     def test_display_info_with_unicode_msg(self):
-        munkicommon.display_info(MSG_UNI)
+        display.display_info(MSG_UNI)
 
     def test_display_info_with_str_msg(self):
-        munkicommon.display_info(MSG_STR)
+        display.display_info(MSG_STR)
 
     def test_display_info_with_unicode_msg_unicode_arg(self):
-        munkicommon.display_info(MSG_UNI, ARG_UNI)
+        display.display_info(MSG_UNI, ARG_UNI)
 
     def test_display_info_with_unicode_msg_str_arg(self):
-        munkicommon.display_info(MSG_UNI, ARG_STR)
+        display.display_info(MSG_UNI, ARG_STR)
 
     def test_display_info_with_str_msg_unicode_arg(self):
-        munkicommon.display_info(MSG_STR, ARG_UNI)
+        display.display_info(MSG_STR, ARG_UNI)
 
     def test_display_info_with_str_msg_str_arg(self):
-        munkicommon.display_info(MSG_STR, ARG_STR)
+        display.display_info(MSG_STR, ARG_STR)
 
 
 class TestDisplayWarningUnicodeOutput(unittest.TestCase):
-    """Test munkicommon display_warning with text that may or may not be proper
+    """Test display_warning with text that may or may not be proper
     Unicode."""
 
     def test_display_warning_with_unicode_msg(self):
-        munkicommon.display_warning(MSG_UNI)
+        display.display_warning(MSG_UNI)
 
     def test_display_warning_with_str_msg(self):
-        munkicommon.display_warning(MSG_STR)
+        display.display_warning(MSG_STR)
 
     def test_display_warning_with_unicode_msg_unicode_arg(self):
-        munkicommon.display_warning(MSG_UNI, ARG_UNI)
+        display.display_warning(MSG_UNI, ARG_UNI)
 
     def test_display_warning_with_unicode_msg_str_arg(self):
-        munkicommon.display_warning(MSG_UNI, ARG_STR)
+        display.display_warning(MSG_UNI, ARG_STR)
 
     def test_display_warning_with_str_msg_unicode_arg(self):
-        munkicommon.display_warning(MSG_STR, ARG_UNI)
+        display.display_warning(MSG_STR, ARG_UNI)
 
     def test_display_warning_with_str_msg_str_arg(self):
-        munkicommon.display_warning(MSG_STR, ARG_STR)
+        display.display_warning(MSG_STR, ARG_STR)
 
 
 class TestDisplayErrorUnicodeOutput(unittest.TestCase):
-    """Test munkicommon display_error with text that may or may not be proper
+    """Test display_error with text that may or may not be proper
     Unicode."""
 
     def test_display_error_with_unicode_msg(self):
-        munkicommon.display_error(MSG_UNI)
+        display.display_error(MSG_UNI)
 
     def test_display_error_with_str_msg(self):
-        munkicommon.display_error(MSG_STR)
+        display.display_error(MSG_STR)
 
     def test_display_error_with_unicode_msg_unicode_arg(self):
-        munkicommon.display_error(MSG_UNI, ARG_UNI)
+        display.display_error(MSG_UNI, ARG_UNI)
 
     def test_display_error_with_unicode_msg_str_arg(self):
-        munkicommon.display_error(MSG_UNI, ARG_STR)
+        display.display_error(MSG_UNI, ARG_STR)
 
     def test_display_error_with_str_msg_unicode_arg(self):
-        munkicommon.display_error(MSG_STR, ARG_UNI)
+        display.display_error(MSG_STR, ARG_UNI)
 
     def test_display_error_with_str_msg_str_arg(self):
-        munkicommon.display_error(MSG_STR, ARG_STR)
+        display.display_error(MSG_STR, ARG_STR)
 
 
 def main():

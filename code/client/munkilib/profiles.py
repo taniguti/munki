@@ -1,7 +1,6 @@
-#!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2016 Greg Neagle.
+# Copyright 2014-2017 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,51 +22,57 @@ import os
 import subprocess
 import tempfile
 
-import FoundationPlist
-import munkicommon
+from . import display
+from . import munkihash
+from . import osutils
+from . import prefs
+from . import FoundationPlist
+
 
 def profiles_supported():
     '''Returns True if config profiles are supported on this OS'''
     darwin_vers = int(os.uname()[2].split('.')[0])
-    return (darwin_vers > 10)
+    return darwin_vers > 10
 
 
-CONFIG_PROFILE_INFO = None
 def config_profile_info(ignore_cache=False):
     '''Returns a dictionary representing the output of `profiles -C -o`'''
-    global CONFIG_PROFILE_INFO
+    if not hasattr(config_profile_info, 'cache'):
+        # a place to cache our return value so we don't have to
+        # call /usr/bin/profiles again
+        config_profile_info.cache = None
     if not profiles_supported():
-        CONFIG_PROFILE_INFO = {}
-        return CONFIG_PROFILE_INFO
-    if not ignore_cache and CONFIG_PROFILE_INFO is not None:
-        return CONFIG_PROFILE_INFO
+        config_profile_info.cache = {}
+        return config_profile_info.cache
+    if not ignore_cache and config_profile_info.cache is not None:
+        return config_profile_info.cache
     output_plist = os.path.join(
-        tempfile.mkdtemp(dir=munkicommon.tmpdir()), 'profiles')
+        tempfile.mkdtemp(dir=osutils.tmpdir()), 'profiles')
     cmd = ['/usr/bin/profiles', '-C', '-o', output_plist]
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     proc.communicate()
     if proc.returncode != 0:
-        munkicommon.display_error(
+        display.display_error(
             'Could not obtain configuration profile info: %s' % proc.stderr)
-        CONFIG_PROFILE_INFO = {}
+        config_profile_info.cache = {}
     else:
         try:
-            CONFIG_PROFILE_INFO = FoundationPlist.readPlist(
+            config_profile_info.cache = FoundationPlist.readPlist(
                 output_plist + '.plist')
         except BaseException, err:
-            munkicommon.display_error(
+            display.display_error(
                 'Could not read configuration profile info: %s' % err)
-            CONFIG_PROFILE_INFO = {}
+            config_profile_info.cache = {}
         finally:
             try:
                 os.unlink(output_plist + '.plist')
             except BaseException:
                 pass
-        return CONFIG_PROFILE_INFO
+        return config_profile_info.cache
 
 
-def profile_info_for_installed_identifier(identifier, ignore_cache=False):
+def info_for_installed_identifier(identifier, ignore_cache=False):
     '''Returns the info dict for an installed profile identified by
     identifier, or empty dict if identifier not found.'''
     for profile in config_profile_info(
@@ -77,7 +82,7 @@ def profile_info_for_installed_identifier(identifier, ignore_cache=False):
     return {}
 
 
-def identifier_in_config_profile_info(identifier):
+def in_config_profile_info(identifier):
     '''Returns True if identifier is among the installed PayloadIdentifiers,
     False otherwise'''
     for profile in config_profile_info().get('_computerlevel', []):
@@ -88,8 +93,8 @@ def identifier_in_config_profile_info(identifier):
 
 def profile_receipt_data_path():
     '''Returns the path to our installed profile data store'''
-    ManagedInstallDir = munkicommon.pref('ManagedInstallDir')
-    return os.path.join(ManagedInstallDir, 'ConfigProfileData.plist')
+    return os.path.join(
+        prefs.pref('ManagedInstallDir'), 'ConfigProfileData.plist')
 
 
 def profile_receipt_data():
@@ -106,8 +111,8 @@ def store_profile_receipt_data(identifier, hash_value):
     If hash_value is None, item is removed from the datastore.'''
     profile_data = profile_receipt_data()
     if hash_value is not None:
-        profile_dict = profile_info_for_installed_identifier(identifier,
-                                                             ignore_cache=True)
+        profile_dict = info_for_installed_identifier(identifier,
+                                                     ignore_cache=True)
         install_date = profile_dict.get('ProfileInstallDate', 'UNKNOWN')
         profile_data[identifier] = {
             'FileHash': hash_value,
@@ -118,7 +123,7 @@ def store_profile_receipt_data(identifier, hash_value):
     try:
         FoundationPlist.writePlist(profile_data, profile_receipt_data_path())
     except BaseException, err:
-        munkicommon.display_error(
+        display.display_error(
             'Cannot update hash for %s: %s' % (identifier, err))
 
 
@@ -130,7 +135,7 @@ def read_profile(profile_path):
         # possibly a signed profile
         return read_signed_profile(profile_path)
     except BaseException, err:
-        munkicommon.display_error(
+        display.display_error(
             'Error reading profile %s: %s' % (profile_path, err))
         return {}
 
@@ -153,21 +158,21 @@ def read_signed_profile(profile_path):
     stdout, stderr = proc.communicate()
     if proc.returncode:
         # security cms -D couldn't decode the file
-        munkicommon.display_error(
+        display.display_error(
             'Error reading profile %s: %s' % (profile_path, stderr))
         return {}
     try:
         return FoundationPlist.readPlistFromString(stdout)
     except FoundationPlist.NSPropertyListSerializationException, err:
         # not a valid plist
-        munkicommon.display_error(
+        display.display_error(
             'Error reading profile %s: %s' % (profile_path, err))
         return {}
 
 
 def record_profile_receipt(profile_path, profile_identifier):
     '''Stores a receipt for this profile in our profile tracking plist'''
-    profile_hash = munkicommon.getsha256hash(profile_path)
+    profile_hash = munkihash.getsha256hash(profile_path)
     if profile_identifier:
         store_profile_receipt_data(profile_identifier, profile_hash)
 
@@ -199,14 +204,14 @@ def install_profile(profile_path, profile_identifier):
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     proc.communicate()
     if proc.returncode != 0:
-        munkicommon.display_error(
+        display.display_error(
             'Profile %s installation failed: %s'
             % (os.path.basename(profile_path), proc.stderr))
         return False
     if profile_identifier:
         record_profile_receipt(profile_path, profile_identifier)
     else:
-        munkicommon.display_warning(
+        display.display_warning(
             'No identifier for profile %s; cannot record an installation '
             'receipt.' % os.path.basename(profile_path))
     return True
@@ -222,7 +227,7 @@ def remove_profile(identifier):
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     proc.communicate()
     if proc.returncode != 0:
-        munkicommon.display_error(
+        display.display_error(
             'Profile %s removal failed: %s' % (identifier, proc.stderr))
         return False
     remove_profile_receipt(identifier)
@@ -237,25 +242,25 @@ def profile_needs_to_be_installed(identifier, hash_value):
     4) ProfileInstallDate doesn't match the receipt'''
     if not profiles_supported():
         return False
-    if not identifier_in_config_profile_info(identifier):
-        munkicommon.display_debug2(
+    if not in_config_profile_info(identifier):
+        display.display_debug2(
             'Profile identifier %s is not installed.' % identifier)
         return True
     receipt = get_profile_receipt(identifier)
     if not receipt:
-        munkicommon.display_debug2(
+        display.display_debug2(
             'No receipt for profile identifier %s.' % identifier)
         return True
-    munkicommon.display_debug2('Receipt for %s:\n%s' % (identifier, receipt))
+    display.display_debug2('Receipt for %s:\n%s' % (identifier, receipt))
     if receipt.get('FileHash') != hash_value:
-        munkicommon.display_debug2(
+        display.display_debug2(
             'Receipt FileHash for profile identifier %s does not match.'
             % identifier)
         return True
-    installed_dict = profile_info_for_installed_identifier(identifier)
+    installed_dict = info_for_installed_identifier(identifier)
     if (installed_dict.get('ProfileInstallDate')
             != receipt.get('ProfileInstallDate')):
-        munkicommon.display_debug2(
+        display.display_debug2(
             'Receipt ProfileInstallDate for profile identifier %s does not '
             'match.' % identifier)
         return True
@@ -267,10 +272,14 @@ def profile_is_installed(identifier):
     return True, else return False'''
     if not profiles_supported():
         return False
-    if identifier_in_config_profile_info(identifier):
-        munkicommon.display_debug2(
+    if in_config_profile_info(identifier):
+        display.display_debug2(
             'Profile identifier %s is installed.' % identifier)
         return True
-    munkicommon.display_debug2(
+    display.display_debug2(
         'Profile identifier %s is not installed.' % identifier)
     return False
+
+
+if __name__ == '__main__':
+    print 'This is a library of support tools for the Munki Suite.'

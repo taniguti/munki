@@ -1,7 +1,6 @@
-#!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2009-2016 Greg Neagle.
+# Copyright 2009-2017 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -73,3 +72,7 @@ def assertNoIdleSleep():
 def removeNoIdleSleepAssertion(assertion_id):
     """Uses IOKit functions to remove a "no idle sleep" assertion."""
     return libIOKit.IOPMAssertionRelease(assertion_id)
+
+
+if __name__ == '__main__':
+    print 'This is a library of support tools for the Munki Suite.'

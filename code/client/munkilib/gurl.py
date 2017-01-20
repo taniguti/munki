@@ -1,7 +1,6 @@
-#!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2009-2016 Greg Neagle.
+# Copyright 2009-2017 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
@@ -34,7 +33,6 @@ from objc import super
 # No name 'Foo' in module 'Bar' warnings. Disable them.
 # pylint: disable=E0611
 
-from CFNetwork import kCFNetworkProxiesHTTPSEnable, kCFNetworkProxiesHTTPEnable
 
 from Foundation import (NSBundle, NSRunLoop, NSDate,
                         NSObject, NSURL, NSURLConnection,
@@ -49,6 +47,8 @@ from Foundation import (NSBundle, NSRunLoop, NSDate,
 
 try:
     from Foundation import NSURLSession, NSURLSessionConfiguration
+    from CFNetwork import (kCFNetworkProxiesHTTPSEnable,
+                           kCFNetworkProxiesHTTPEnable)
     NSURLSESSION_AVAILABLE = True
 except ImportError:
     NSURLSESSION_AVAILABLE = False
@@ -694,3 +694,7 @@ class Gurl(NSObject):
         # we don't actually use the connection argument, so
         # pylint: disable=W0613
         self.handleReceivedData_(data)
+
+
+if __name__ == '__main__':
+    print 'This is a library of support tools for the Munki Suite.'

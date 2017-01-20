@@ -1,7 +1,6 @@
-#!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2010-2016 Greg Neagle.
+# Copyright 2010-2017 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License');
 # you may not use this file except in compliance with the License.
@@ -225,3 +224,7 @@ def getAppInfoPathsFromBundleComponentPkg(pkg_path):
         return [line for line in output.splitlines()
                 if line.endswith('.app/Contents/Info.plist')]
     return []
+
+
+if __name__ == '__main__':
+    print 'This is a library of support tools for the Munki Suite.'

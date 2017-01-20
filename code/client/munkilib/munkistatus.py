@@ -1,7 +1,6 @@
-#!/usr/bin/python
 # encoding: utf-8
 #
-# Copyright 2009-2016 Greg Neagle.
+# Copyright 2009-2017 Greg Neagle.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -156,3 +155,6 @@ def restartAlert():
     # should not persist between notifications
     _currentStatus['command'] = ''
 
+
+if __name__ == '__main__':
+    print 'This is a library of support tools for the Munki Suite.'
