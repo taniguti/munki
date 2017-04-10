@@ -228,7 +228,7 @@ def make_dmg(pkgpath):
         output = proc.stdout.readline()
         if not output and (proc.poll() != None):
             break
-        print output.rstrip('\n').encode('UTF-8')
+        print output.rstrip('\n').decode('UTF-8')
         sys.stdout.flush()
     retcode = proc.poll()
     if retcode:
@@ -806,7 +806,7 @@ def make_catalogs():
         if not output and (proc.poll() != None):
             break
         if VERBOSE:
-            print output.rstrip('\n').encode('UTF-8')
+            print output.rstrip('\n').decode('UTF-8')
 
     errors = proc.stderr.read()
     if errors:
@@ -1049,6 +1049,9 @@ def main():
                         '%s is an unknown type.' % uninstaller_item)
                     cleanup_and_exit(-1)
                 else:
+                    # Strip trailing '/' from uninstaller_item
+                    uninstaller_item = uninstaller_item.rstrip('/')
+
                     # we need to convert to dmg
                     dmg_path = make_dmg(uninstaller_item)
                     if dmg_path:
