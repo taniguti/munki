@@ -307,6 +307,10 @@ footer {
     padding: 0 20px
 }
 
+footer script {
+   display: none !important;
+}
+
 footer div.bottom-links {
     margin: 0 0 0 0;
     border-top: 1px solid #d3d7db;
@@ -1239,7 +1243,8 @@ span.removal-error,
 span.will-be-installed, 
 span.will-be-removed,
 span.update-will-be-installed, 
-span.update-available {
+span.update-available, 
+span.warning {
     visibility: visible !important;
     color: #CC0000 !important;
 }
